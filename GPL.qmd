@@ -1,0 +1,1308 @@
+---
+title: "GPL"
+format: html
+editor: source
+author: Grant Mitchell
+---
+
+This code runs the analysis for my paper, Populist Paths to Autocracy. It uses data cleaned by the author to test an interaction effect between populist discourse and an index of several party organization indicators on the quality of democracy. I take several indicators of democratic quality and run OLS, Bayesian regressions, General Additive Models, and Fixed-Effects models to test this interaction.
+
+The logic behind why specific party structures moderate the effect of populist discourse is fleshed out in the paper, but I will give a summary here. While the discourse of populist leaders betrays their motive to harm liberal democracy, it does not explain the capacity of those leaders. This has resulted in the heterogeneous effect of populist discourse. Some leaders take over democracy and suffocate it, while others fail to live out their term. This is the case for two reasons. First, populists require consistent broad support as they unravel democratic institutions. This support is far from assured. Second, populists must have a unified party to insulate them from elite attacks. Given the personalistic style many populist leaders use, this is also not a given. As such, populists need the means to ensure broad support (I theorize that this is mass patronage) and a unified party. When populists have both these factors, they can erode democracy. When they do not, they fall short and are removed from office.
+The data set I use merges several data sets to test my theory. I draw from Quality of Governance, Varieties of Democracy and Party, the Standardized World Income Inequality Database, the World Bank, and the Global Populism Database.
+
+Here is a guide for understanding the variables in this analysis.
+
+populismavg - the intensity of a leader's populist rhetoric.
+This variable is logged. Higher values mean more populism.
+
+icap - the incumbent capacity index, created by taking the average of V-Party's internal cohesion and clientelism measures. Higher means more capacity. The term of interest is the interaction between this index and populism.
+
+lngdppc - logged GDP per capita at y0 (the year before a leader takes office).
+
+lndemocexp - logged years of democratic experience (polyarchy >= .42)
+
+lnseatshare - logged seat share of leaders party at y0.
+
+lnyear - logged years in office for consecutive term/s.
+
+polyarchy - V-Dem electoral democracy score. There are t0 and chg versions.
+
+frefair - V-Dem electoral integraty score. There are t0 and chg versions.
+
+civlib - V-Dem political rights score. There are t0 and chg versions.
+
+horacc - V-Dem horizontal accountability score. There are t0 and chg versions.
+
+op_strength - the V-Party grassroots organization measure for the largest opposition party.
+
+lnopseatshare - logged seat share for the largest opposition party
+
+The format for this code follows—first, load the packages. Make sure to have all of the packages necessary to run the script. Not all of the packages used are loaded here. I also use the corrplot and car packages for specific lines of code. Make sure to install those as well.
+
+Proceed to model selection and checking OLS assumptions for the various models. It moves through the analysis by the dependent variable: polyarchy/electoral democracy, free and fair elections, civil liberties, and horizontal accountability.
+
+The next step is cross-validation using Bayesian Leave One Out Analysis (LOO). The order proceeds in the same way as before.
+
+The script then checks the interaction effect for each model in 3 ways: General Additive Model, Linear interaction, and Kernel interaction (see Heinmuller et al. 2019).
+
+It then runs models with Clustered standard errors and Fixed Effects. Redone interactions with FE follow these models.
+
+All data was cleaned by the author in STATA.
+
+## Load packages
+
+```{r, include=FALSE}
+library(tidyverse)
+library(haven)
+library(ggfortify)
+library(ggthemes)
+library(GGally)
+library(rstanarm)
+library(miceadds)
+library(sandwich)
+library(estimatr)
+library(bestglm)
+library(interflex)
+library(stargazer)
+```
+
+### Polyarchy Model selection
+
+#### Read in the data
+
+```{r}
+gpl <- read_dta("C:/Users/ochoc/Dropbox/Populism Projects/GPL data/gpl_2023.dta") %>%
+  rename(lnopseatshare = lnopseatahre)
+
+varis <- gpl %>%
+  filter(polyarchy_t0 >= .42) %>%
+  select(lnseatshare, lndemocexp, lngdppc, polyarchy_t0, icap, populismavg, op_strength, lnyears, polyarchy_chg, lnopseatshare) %>%
+  na.omit() #### for every model, only regimes with a starting score of >= .42 are considered because this is the new V-Dem threshold.
+
+attach(varis)
+```
+
+#### Visualize data
+
+Correlation Matrix
+
+```{r}
+corrplot::corrplot(cor(varis))
+```
+
+GGpairs plot
+
+```{r}
+ggpairs(varis)
+```
+
+#### Model selection
+
+We are interested in the interaction between populism (logged) and incumbent capacity, so we include the intercaction in all the models. For this reason we use stepwise selection instead of best subsets or LASSO.
+
+```{r}
+base_mod <- glm(polyarchy_chg ~ populismavg*icap) 
+
+full_mod <- glm(polyarchy_chg ~ populismavg*icap + lnseatshare + lndemocexp + lnyears + lngdppc + polyarchy_t0 + op_strength + lnopseatshare)
+
+#### Forward
+
+step_forward_aic <- step(base_mod,
+                      direction = "forward",
+                      k = 2,
+                      scope=list(lower= base_mod, upper= full_mod))
+
+
+step_forward_bic <- step(base_mod,
+                      direction = "forward",
+                      k = log(nrow(varis)),
+                      scope=list(lower= base_mod, upper= full_mod))
+
+#### Backward
+
+step_back_aic <- step(full_mod,
+                      direction = "back",
+                      k = 2,
+                      scope=list(lower= base_mod, upper= full_mod))
+
+step_back_bic <- step(full_mod,
+                      direction = "back",
+                      k = log(nrow(varis)),
+                      scope=list(lower= base_mod, upper= full_mod))
+
+#### Both
+
+step_both_aic <- step(base_mod,
+                      direction = "both",
+                      k = 2,
+                      scope=list(lower= base_mod, upper= full_mod))
+
+step_both_bic <- step(base_mod,
+                      direction = "both",
+                      k = log(nrow(varis)),
+                      scope=list(lower= base_mod, upper= full_mod))
+
+```
+
+Compare formulas
+
+```{r}
+step_forward_aic$formula
+step_forward_bic$formula
+step_back_aic$formula
+step_back_bic$formula
+step_both_aic$formula
+step_both_bic$formula
+```
+
+I'll use 2 formulas here:
+
+Theoretical/full model. This model includes all of the variables I have considered when think about alternative explinations. It is likely over fitted, but the model that most social scientists are most interested in.
+
+```{r} 
+f2 <- polyarchy_chg ~ populismavg*icap + lnseatshare + lndemocexp + lnyears+ lngdppc + polyarchy_t0 + op_strength + lnopseatshare
+```
+
+Simple/Parsimonious Model. This model balances the theoretically important variables and a simple model with low BIC/AIC. This is the logic I follow for the rest of the model selection processes.
+
+```{r}
+f1 <- step_both_bic$formula 
+```
+
+## Running the OLS Models
+
+### Simple Model
+
+```{r}
+varis <- gpl %>% 
+  filter(polyarchy_t0 >= .42) %>% 
+  select(leader, lnseatshare, lndemocexp, lnyears, lngdppc, polyarchy_t0, polyarchy_chg, icap, populismavg, cow, op_strength, lnopseatshare)
+attach(varis)
+
+m1 <- lm(f1)
+```
+
+#### Check assumptions
+
+```{r}
+
+##### Linearity
+
+autoplot(m1, which = 1, nrows = 1, ncols = 1)#### not bad
+
+#### Normality
+
+autoplot(m1, which = 2, nrows = 1, ncols = 1)#### does not look great, but not terrible
+hist(m1$residuals, freq = F) #### not bad, not good.
+
+#### Constant Variance
+
+autoplot(m1, which = 3, nrows = 1, ncols = 1) #### bad, but this is likely because the errors need to be clustered by country. This also might cause come non-linearity.
+
+#### Cooks Distance
+
+autoplot(m1, which = 4, nrows = 1, ncols = 1) #### some outlines, not a ton. Nothing above .5. Leave as is.
+
+car::vif(m1, type = "predictor") #### Looks good
+```
+
+Check the results
+
+```{r}
+summary(m1) #### Interaction is sig at .001
+```
+
+### Full Model
+
+``` {r}
+m2 <- lm(f2)
+
+#### Linearity
+
+autoplot(m2, which = 1, nrows = 1, ncols = 1) #### not good,but I've seen worse
+
+#### Normality
+
+autoplot(m2, which = 2, nrows = 1, ncols = 1)#### does not look great, but not terrible 
+hist(m2$residuals, freq = F) #### not bad, not good
+
+#### Constant Variance
+
+autoplot(m2, which = 3, nrows = 1, ncols = 1) #### not a surprise, we need to cluster SE's
+
+#### Cooks Distance
+
+autoplot(m2, which = 4, nrows = 1, ncols = 1) #### Noting above .5. Leave as is.
+
+car::vif(m2, type = "predictor") #### Looks good
+```
+
+Check Results
+
+```{r}
+summary(m2) #### Interaction sig at .001
+```
+
+
+## Free and Fair elections
+
+```{r}
+varis <- gpl %>% 
+  filter(polyarchy_t0 >= .42) %>% 
+  select(lnseatshare, lndemocexp, lnyears, lngdppc, frefair_t0, frefair_chg, icap, populismavg, op_strength, lnopseatshare) %>% 
+  na.omit() 
+attach(varis)
+```
+
+#### Visualize data
+
+```{r}
+corrplot::corrplot(cor(varis))
+
+ggpairs(varis)
+```
+
+#### Model selection
+
+```{r}
+
+base_mod <- glm(frefair_chg ~ populismavg*icap)
+
+full_mod <- glm(frefair_chg ~ populismavg*icap + lnseatshare + lndemocexp + lnyears+ lngdppc + frefair_t0 + op_strength + lnopseatshare)
+
+#### Forward
+
+step_forward_aic <- step(base_mod, direction = "forward", k = 2, scope=list(lower= base_mod, upper= full_mod))
+
+step_forward_bic <- step(base_mod, direction = "forward", k = log(nrow(varis)), scope=list(lower= base_mod, upper= full_mod))
+
+#### Backward
+
+step_back_aic <- step(full_mod, direction = "back", k = 2, scope=list(lower= base_mod, upper= full_mod))
+
+step_back_bic <- step(full_mod, direction = "back", k = log(nrow(varis)), scope=list(lower= base_mod, upper= full_mod))
+
+#### Both
+
+step_both_aic <- step(base_mod, direction = "both", k = 2, scope=list(lower= base_mod, upper= full_mod))
+
+step_both_bic <- step(base_mod, direction = "both", k = log(nrow(varis)), scope=list(lower= base_mod, upper= full_mod))
+```
+
+#### Compare formulas
+
+```{r}
+step_forward_aic$formula 
+step_forward_bic$formula 
+step_back_aic$formula 
+step_back_bic$formula 
+step_both_aic$formula 
+step_both_bic$formula
+```
+
+Theoretical/full model
+
+```{r}
+f4 <- frefair_chg ~ populismavg*icap + lnseatshare + lndemocexp + lnyears+ lngdppc + frefair_t0 + op_strength + lnopseatshare 
+```
+
+Simple/Parsimonious Model
+
+```{r}
+f3 <- step_both_bic$formula
+```
+
+### Models
+
+#### Simple Model
+
+```{r}
+varis <- gpl %>% 
+  filter(polyarchy_t0 >= .42) %>% 
+  select(lnseatshare, lndemocexp, lnyears, lngdppc, frefair_t0, frefair_chg, icap, populismavg, cow, op_strength, lnopseatshare)
+attach(varis)
+
+
+m3 <- lm(f3)
+```
+
+#### Check assumptions
+
+```{r}
+#### Linearity
+
+autoplot(m3, which = 1, nrows = 1, ncols = 1) #### not bad
+
+#### Normality
+
+autoplot(m3, which = 2, nrows = 1, ncols = 1)#### does not look great, but not terrible
+hist(m3$residuals, freq = F) #### like before, not bad, not good
+
+#### Constant Variance
+
+autoplot(m3, which = 3, nrows = 1, ncols = 1) #### Cluster the SEs
+
+#### Cooks Distance
+
+autoplot(m3, which = 4, nrows = 1, ncols = 1) #### some outlines, not a ton. Still none above .5, so leave as the same.
+
+car::vif(m3, type = "predictor") #### Looks good
+```
+
+Check the results
+
+```{r}
+summary(m3) #### interaction Significant at .01
+```
+
+#### Full model
+
+```{r}
+m4 <- lm(f4)
+
+#### Linearity
+
+autoplot(m4, which = 1, nrows = 1, ncols = 1) #### not good, but I've seen worse
+
+#### Normality
+
+autoplot(m4, which = 2, nrows = 1, ncols = 1)#### does not look great, but not terrible \
+hist(m4$residuals, freq = F) #### not bad, not good. there appears to be observations with really big residuals.
+
+#### Constant Variance
+
+autoplot(m4, which = 3, nrows = 1, ncols = 1) #### not a surprise, we need to cluster SE's
+
+#### Cooks Distance
+
+autoplot(m4, which = 4, nrows = 1, ncols = 1) #### the big outliar did not have a super large cooks d, so we leave it as it.
+
+car::vif(m4, type = "predictor") #### looks good.
+```
+
+Check Results
+
+```{r}
+summary(m4) #### term sig at 0.01
+```
+
+## Civil Liberties
+
+```{r}
+varis <- gpl %>% 
+  filter(polyarchy_t0 >= .42) %>% 
+  select(lnseatshare, lndemocexp, lnyears, lngdppc, civlib_t0, civlib_chg, icap, populismavg, op_strength, lnopseatshare) %>% 
+  na.omit() 
+attach(varis)
+```
+
+#### Visualize data
+
+```{r}
+corrplot::corrplot(cor(varis))
+
+ggpairs(varis)
+```
+
+### Model selection
+
+```{r}
+base_mod <- glm(civlib_chg ~ populismavg*icap)
+
+full_mod <- glm(civlib_chg ~ populismavg*icap + lnseatshare + lndemocexp + lnyears+ lngdppc + civlib_t0 + op_strength + lnopseatshare)
+
+#### Forward
+
+step_forward_aic <- step(base_mod, direction = "forward", k = 2, scope=list(lower= base_mod, upper= full_mod))
+
+step_forward_bic <- step(base_mod, direction = "forward", k = log(nrow(varis)), scope=list(lower= base_mod, upper= full_mod))
+
+#### Backward
+
+step_back_aic <- step(full_mod, direction = "back", k = 2, scope=list(lower= base_mod, upper= full_mod))
+
+step_back_bic <- step(full_mod, direction = "back", k = log(nrow(varis)), scope=list(lower= base_mod, upper= full_mod))
+
+#### Both
+
+step_both_aic <- step(base_mod, direction = "both", k = 2, scope=list(lower= base_mod, upper= full_mod))
+
+step_both_bic <- step(base_mod, direction = "both", k = log(nrow(varis)), scope=list(lower= base_mod, upper= full_mod))
+```
+
+Compare formulas
+
+```{r}
+step_forward_aic$formula 
+step_forward_bic$formula 
+step_back_aic$formula 
+step_back_bic$formula 
+step_both_aic$formula 
+step_both_bic$formula
+```
+
+Theoretical/full model
+
+```{r}
+f6 <- civlib_chg ~ populismavg*icap + lnseatshare + lndemocexp + lnyears+ lngdppc + civlib_t0 + op_strength + lnopseatshare
+```
+
+Simple/Parsimonious Model
+
+```{r}
+f5 <- step_both_aic$formula
+```
+
+### Models
+
+#### Simple Model
+
+```{r}
+varis <- gpl %>% 
+  filter(polyarchy_t0 >= .42) %>% 
+  select(leader, lnseatshare, lndemocexp, lnyears, lngdppc, civlib_t0, civlib_chg, icap, populismavg, cow, op_strength, lnopseatshare) 
+attach(varis)
+
+m5 <- lm(f5)
+```
+
+#### Check assumptions
+
+#### Linearity
+
+```{r}
+autoplot(m5, which = 1, nrows = 1, ncols = 1) #### not bad. this seems to be on par with the rest
+
+#### Normality
+
+autoplot(m5, which = 2, nrows = 1, ncols = 1)#### does not look great, but not terrible. 30 might need to go. 
+hist(m5$residuals, freq = F) #### There seems to be some big outliers, we might need to drop some values
+
+#### Constant Variance
+
+autoplot(m5, which = 3, nrows = 1, ncols = 1) #### Need to cluster SEs
+
+#### Cooks Distance
+
+autoplot(m5, which = 4, nrows = 1, ncols = 1) #### We need to drop obs 30
+
+car::vif(m5, type = "predictor") #### Looks good.
+```
+
+Check results
+
+```{r}
+summary(m5) #### sig at .001
+```
+
+#### Full Model/Theoretically Complex Model
+
+```{r}
+m6 <- lm(f6)
+
+#### Linearity
+
+autoplot(m6, which = 1, nrows = 1, ncols = 1) #### okay
+
+#### Normality
+
+autoplot(m6, which = 2, nrows = 1, ncols = 1)#### We will drop the 30th obs, so this would look better.
+
+hist(m6$residuals, freq = F) #### same here
+
+#### Constant Variance
+
+autoplot(m6, which = 3, nrows = 1, ncols = 1) #### Cluster SEs
+
+#### Cooks Distance
+
+autoplot(m6, which = 4, nrows = 1, ncols = 1) #### Slightly better than the simple model. We will still drop 30.
+
+car::vif(m6, type = "predictor") #### Looks good
+```
+
+Check results
+
+```{r}
+summary(m6) #### Sig at .001
+```
+
+#### Horizontal Accountability
+
+```{r}
+varis <- gpl %>% 
+  filter(polyarchy_t0 >= .42) %>% 
+  select(lnseatshare, lndemocexp, lnyears, lngdppc, horacc_t0, horacc_chg, icap, populismavg, op_strength, lnopseatshare) %>% 
+  na.omit()
+attach(varis)
+```
+
+#### Visualize data
+
+```{r}
+corrplot::corrplot(cor(varis))
+
+ggpairs(varis)
+```
+
+#### Model selection
+
+```{r}
+base_mod <- glm(horacc_chg ~ populismavg*icap)
+
+full_mod <- glm(horacc_chg ~ populismavg*icap + lnseatshare + lndemocexp + lnyears+ lngdppc + horacc_t0 + op_strength + lnopseatshare)
+
+#### Forward
+
+step_forward_aic <- step(base_mod, direction = "forward", k = 2, scope=list(lower= base_mod, upper= full_mod))
+
+step_forward_bic <- step(base_mod, direction = "forward", k = log(nrow(varis)), scope=list(lower= base_mod, upper= full_mod))
+
+#### Backward
+
+step_back_aic <- step(full_mod, direction = "back", k = 2, scope=list(lower= base_mod, upper= full_mod))
+
+step_back_bic <- step(full_mod, direction = "back", k = log(nrow(varis)), scope=list(lower= base_mod, upper= full_mod))
+
+#### Both
+
+step_both_aic <- step(base_mod, direction = "both", k = 2, scope=list(lower= base_mod, upper= full_mod))
+
+step_both_bic <- step(base_mod, direction = "both", k = log(nrow(varis)), scope=list(lower= base_mod, upper= full_mod))
+```
+
+Compare formulas
+
+```{r}
+step_forward_aic$formula 
+step_forward_bic$formula 
+step_back_aic$formula 
+step_back_bic$formula 
+step_both_aic$formula 
+step_both_bic$formula
+```
+
+Theoretical/full model
+
+```{r}
+f8 <- horacc_chg ~ populismavg*icap + lnseatshare + lndemocexp + lnyears+ lngdppc + horacc_t0 + op_strength + lnopseatshare
+```
+
+Simple Model
+
+```{r}
+f7 <- step_back_aic$formula
+```
+
+### Models
+
+#### Simple Model
+
+```{r}
+varis <- gpl %>% 
+  filter(polyarchy_t0 >= .42) %>% 
+  select(leader, lnseatshare, lndemocexp, lnyears, lngdppc, horacc_t0, horacc_chg, icap, populismavg, cow, op_strength, lnopseatshare) 
+attach(varis)
+
+m7 <- lm(f7)
+```
+
+#### Check assumptions
+
+```{r}
+#### Linearity
+
+autoplot(m7, which = 1, nrows = 1, ncols = 1) #### really good
+
+#### Normality
+
+autoplot(m7, which = 2, nrows = 1, ncols = 1)#### does not look great. We may need to drop 42.
+
+hist(m7$residuals, freq = F) #### not bad, not good
+
+#### Constant Variance
+
+autoplot(m7, which = 3, nrows = 1, ncols = 1) #### pretty good considering we need to cluster by SE.
+
+#### Cooks Distance
+
+autoplot(m7, which = 4, nrows = 1, ncols = 1) #### We need to drop obs 42
+
+car::vif(m7, type = "predictor") #### looks good
+```
+
+Check results
+
+```{r}
+summary(m7) #### Sig at .01
+```
+
+#### Full Model/Theoretically Complex Model
+
+```{r}
+m8 <- lm(f8)
+
+#### Linearity
+
+autoplot(m8, which = 1, nrows = 1, ncols = 1) #### Good
+
+#### Normality
+
+autoplot(m8, which = 2, nrows = 1, ncols = 1)#### Drop 42
+
+hist(m8$residuals, freq = F)
+
+#### Constant Variance
+
+autoplot(m8, which = 3, nrows = 1, ncols = 1) #### Not bad
+
+#### Cooks Distance
+
+autoplot(m8, which = 4, nrows = 1, ncols = 1) #### We are going to drop 42 anyway.
+
+car::vif(m8, type = "predictor") #### looks good
+```
+
+Check results
+
+```{r}
+summary(m8) #### sig at 0.01
+```
+
+### Leave One Out Cross Validation
+I use the Bayesian method because I find it easier coding wise.
+
+#### Polyarchy
+
+```{r}
+poly_varis <- gpl %>% 
+  filter(polyarchy_t0 >= .42) %>% 
+  select(lnseatshare, lndemocexp, lnyears, lngdppc, icap, populismavg, cow, op_strength, lnopseatshare, polyarchy_t0, polyarchy_chg) %>% 
+  na.omit()
+
+bm1 <- stan_glm(f1, data = poly_varis, refresh = 0) 
+bm2 <- stan_glm(f2, data = poly_varis, refresh = 0)
+loom1 <- loo(bm1, k_threshold = 0.7) 
+loom2 <- loo(bm2, k_threshold = 0.7) 
+loo_compare(loom1, loom2) 
+```
+
+The simple model is the better model, but its not a big difference.
+
+#### Free and Fair election
+
+```{r}
+ff_varis <- gpl %>% 
+  filter(polyarchy_t0 >= .42) %>% 
+  select(lnseatshare, lndemocexp, lnyears, lngdppc, icap, populismavg, cow, op_strength, lnopseatshare, frefair_t0, frefair_chg) %>% 
+  na.omit()
+
+bm3 <- stan_glm(f3, data = ff_varis, refresh = 0)
+bm4 <- stan_glm(f4, data = ff_varis, refresh = 0) 
+loom3 <- loo(bm3, k_threshold = 0.7) 
+loom4 <- loo(bm4,k_threshold = 0.7) 
+loo_compare(loom3, loom4)
+```
+
+Simple Model performs a little better.
+
+#### Civil Liberties
+
+```{r}
+cl_varis <- gpl %>% filter(polyarchy_t0 >= .42) %>% select(lnseatshare, lndemocexp, lnyears, lngdppc, icap, populismavg, cow, op_strength, lnopseatshare, civlib_t0, civlib_chg) %>% 
+  na.omit() 
+cl_varis <- cl_varis[-29,] #### remove Daniel Ortega
+
+bm5 <- stan_glm(f5, data = cl_varis, refresh = 0)
+bm6 <- stan_glm(f6, data = cl_varis, refresh = 0)
+loom5 <- loo(bm5, k_threshold = 0.7)
+loom6 <- loo(bm6, k_threshold = 0.7)
+loo_compare(loom5, loom6)
+```
+
+Simple Model performs a little better
+
+#### Horizontal Accountability
+
+```{r}
+ha_varis <- gpl %>% 
+  filter(polyarchy_t0 >= .42) %>% 
+  select(lnseatshare, lndemocexp, lnyears, lngdppc, icap, populismavg, cow, op_strength, lnopseatshare, horacc_t0, horacc_chg) %>% 
+  na.omit() 
+ha_varis <- ha_varis[-40,] #### remove Hugo Chavez
+
+bm7 <- stan_glm(f7, data = ha_varis, refresh = 0) 
+bm8 <- stan_glm(f8, data = ha_varis, refresh = 0) 
+loom7 <- loo(bm7, k_threshold = 0.7) 
+loom8 <- loo(bm8, k_threshold = 0.7) 
+loo_compare(loom7, loom8)
+```
+
+Simple Model performs a little better
+
+In general, it seems that the theoretical models, which one would normally report in a paper are over fitted compared to the simple models, and that these simple models are likely better.
+
+## Interactions effects: GAM, Linear, and Kernel (see Heinmuller et al. 2020).
+
+### Polyarchy
+
+#### Simple
+
+```{r}
+interflex(estimator = "gam", Y = "polyarchy_chg", X = "icap", D = "populismavg", Z = c("lnyears", "polyarchy_t0", "lngdppc", "lndemocexp"), data = as.matrix(poly_varis), na.rm = T, wald = T)
+```
+
+This graph shows a fairly substantial interaction effect.
+
+``` {r}
+liplot1 <- interflex(estimator = "linear", Y = "polyarchy_chg", X = "icap", D = "populismavg", Z = c("lnyears", "polyarchy_t0", "lngdppc", "lndemocexp"), data = as.matrix(poly_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity")
+
+print(liplot1$figure)
+```
+
+This confirms what we saw with the GAM.
+
+```{r}
+kiplot1 <- interflex(estimator = "kernel", Y = "polyarchy_chg", X = "icap", D = "populismavg", Z = c("lnyears", "polyarchy_t0", "lngdppc", "lndemocexp"), data = as.matrix(poly_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity")
+
+print(kiplot1$figure)
+```
+
+There does seem to be a real interaction effect, but the moderating appears to be nonlinear.
+
+#### Full
+
+``` {r}
+interflex(estimator = "gam", Y = "polyarchy_chg", X = "icap", D = "populismavg", Z = c("lnyears", "polyarchy_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(poly_varis), na.rm = T, wald = T)
+```
+
+Substantial interaction effect here.
+
+```{r}
+liplot2 <- interflex(estimator = "linear", Y = "polyarchy_chg", X = "icap", D = "populismavg", Z = c("lnyears", "polyarchy_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(poly_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity")
+
+print(liplot2$figure)
+```
+
+Interaction confirmed here
+
+``` {r}
+kiplot2 <- interflex(estimator = "kernel", Y = "polyarchy_chg", X = "icap", D = "populismavg", Z = c("lnyears", "polyarchy_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(poly_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity")
+
+print(kiplot2$figure)
+```
+
+Fairly linear, but this accounts for lack of common support as well.
+
+#### Free and Fair
+
+##### Simple
+
+```{r}
+interflex(estimator = "gam", Y = "frefair_chg", X = "icap", D = "populismavg", Z = c("lnyears", "frefair_t0", "lngdppc", "lndemocexp"), data = as.matrix(ff_varis), na.rm = T, wald = T)
+```
+
+#### big effect here.
+
+```{r}
+liplot3 <- interflex(estimator = "linear", Y = "frefair_chg", X = "icap", D = "populismavg", Z = c("lnyears", "frefair_t0", "lngdppc", "lndemocexp"), data = as.matrix(ff_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity")
+
+print(liplot3$figure)
+```
+
+That effect is confirmed here
+
+```{r}
+kiplot3 <- interflex(estimator = "kernel", Y = "frefair_chg", X = "icap", D = "populismavg", Z = c("lnyears", "frefair_t0", "lngdppc", "lndemocexp"), data = as.matrix(ff_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity")
+
+print(kiplot3$figure)
+```
+
+The interaction seems less significant here.
+
+##### Full
+
+```{r}
+interflex(estimator = "gam", Y = "frefair_chg", X = "icap", D = "populismavg", Z = c("lnyears", "frefair_t0", "lngdppc", "lnseatshare", "lndemocexp", "op_strength", "lnopseatshare"), data = as.matrix(ff_varis), na.rm = T, wald = T)
+```
+
+The interaction is a big effect again
+
+```{r}
+liplot4 <- interflex(estimator = "linear", Y = "frefair_chg", X = "icap", D = "populismavg", Z = c("lnyears", "frefair_t0", "lngdppc"), data = as.matrix(ff_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity")
+
+print(liplot4$figure)
+```
+
+The effect is confirmed here, Likely insignificant once we get more intense models
+
+```{r}
+kiplot4 <- interflex(estimator = "kernel", Y = "frefair_chg", X = "icap", D = "populismavg", Z = c("lnyears", "frefair_t0", "lngdppc"), data = as.matrix(ff_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity")
+
+print(kiplot4$figure)
+```
+
+Yeah, I do not think this effect is credibly different from 0, and it will only get worse as we add more robust models
+
+##### Civil Liberties
+
+###### Simple
+
+```{r}
+interflex(estimator = "gam", Y = "civlib_chg", X = "icap", D = "populismavg", Z = c("lnyears", "lndemocexp", "lngdppc", "civlib_t0"), data = as.matrix(cl_varis), na.rm = T, wald = T)
+```
+
+Another big effect here.
+
+```{r}
+liplot5 <- interflex(estimator = "linear", Y = "civlib_chg", X = "icap", D = "populismavg", Z = c("lnyears", "lndemocexp", "lngdppc", "civlib_t0"), data = as.matrix(cl_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity")
+
+print(liplot5$figure) 
+```
+
+Really nice effect linear effect, even with Ortega out.
+
+```{r}
+kiplot5 <- interflex(estimator = "kernel", Y = "civlib_chg", X = "icap", D = "populismavg", Z = c("lnyears", "lndemocexp", "lngdppc", "civlib_t0"), data = as.matrix(cl_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity")
+
+print(kiplot5$figure)
+```
+
+Fairly Linear and still really strong.
+
+##### Full
+
+```{r}
+interflex(estimator = "gam", Y = "civlib_chg", X = "icap", D = "populismavg", Z = c("lnyears", "civlib_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(cl_varis), na.rm = T, wald = T)
+```
+
+Another big effect here
+
+```{r}
+liplot6 <- interflex(estimator = "linear", Y = "civlib_chg", X = "icap", D = "populismavg", Z = c("lnyears", "civlib_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(cl_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity")
+
+print(liplot6$figure)
+```
+
+Really nice effect again. This interaction is likely significant, even when we get to more rigorous models and tests.
+
+```{r}
+kiplot6 <- interflex(estimator = "kernel", Y = "civlib_chg", X = "icap", D = "populismavg", Z = c("lnyears", "civlib_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(cl_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity")
+
+print(kiplot6$figure) 
+```
+
+The effect is fairly linear effect again.
+
+#### Horizontal Accountability
+
+##### Simple
+
+```{r}
+interflex(estimator = "gam", Y = "horacc_chg", X = "icap", D = "populismavg", Z = c("lnyears", "horacc_t0", "lngdppc"), data = as.matrix(ha_varis), na.rm = T, wald = T) 
+```
+
+This effect seems smaller, but still large
+
+```{r}
+liplot7 <- interflex(estimator = "linear", Y = "horacc_chg", X = "icap", D = "populismavg", Z = c("lnyears", "horacc_t0", "lngdppc"), data = as.matrix(ha_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity")
+
+print(liplot7$figure)
+```
+
+This effect is not significant to start out with. The rest will likely not be either.
+
+```{r}
+kiplot7 <- interflex(estimator = "kernel", Y = "horacc_chg", X = "icap", D = "populismavg", Z = c("lnyears", "horacc_t0", "lngdppc"), data = as.matrix(ha_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity")
+
+print(kiplot7$figure)
+```
+
+#### Full
+
+```{r}
+interflex(estimator = "gam", Y = "horacc_chg", X = "icap", D = "populismavg", Z = c("lnyears", "horacc_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(ha_varis), na.rm = T, wald = T)
+```
+
+```{r}
+liplot8 <- interflex(estimator = "linear", Y = "horacc_chg", X = "icap", D = "populismavg", Z = c("lnyears", "horacc_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(ha_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity")
+
+print(liplot8$figure)
+
+kiplot8 <- interflex(estimator = "kernel", Y = "horacc_chg", X = "icap", D = "populismavg", Z = c("lnyears", "horacc_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(ha_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity")
+
+print(kiplot8)
+```
+
+Unless Horizontal Accountability models suddenly become significant, I will not comment on them. The models from here on out are more rigorous, and they are unlikely to have significant results. If that changes, I will start to comment again, if only to investigate why the interaction became significant and to look for any methodological mistakes that might cause that change.
+
+#### Clustering and fixed effects
+
+All of the models have serious problems with inconstant variances, so we need to cluster by the obvious factor, \textit{country}.
+
+#### Electoral Democracy/Polyarchy
+
+#### Simple model
+
+```{r}
+m1c <- lm_robust(f1, clusters = cow, data = poly_varis)
+
+summary(m1c) #### sig at 0.01
+
+liplot1c <- interflex(estimator = "linear", Y = "polyarchy_chg", X = "icap", D = "populismavg", Z = c("lnyears", "polyarchy_t0", "lngdppc", "lndemocexp"), data = as.matrix(poly_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow")
+
+print(liplot1c$figure)
+```
+
+Really nice effect here, even with the clustered SE.
+
+```{r}
+kiplot1c <- interflex(estimator = "kernel", Y = "polyarchy_chg", X = "icap", D = "populismavg", Z = c("lnyears", "polyarchy_t0", "lngdppc", "lndemocexp"), data = as.matrix(poly_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow")
+
+print(kiplot1c$figure)
+```
+
+Fairly linear here, and the effect remains significant
+
+```{r}
+m1fe <- lm_robust(f1, clusters = cow, fixed_effects = cow, data = poly_varis)
+
+summary(m1fe)
+```
+
+Sig at 0.05. This is the most conservative model yet. This is likely a real effect.
+
+```{r}
+liplot1fe <- interflex(estimator = "linear", Y = "polyarchy_chg", X = "icap", D = "populismavg", Z = c("lnyears", "polyarchy_t0", "lngdppc", "lndemocexp"), data = as.matrix(poly_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow", FE = "cow")
+
+print(liplot1fe$figure)
+```
+
+That finding is confirmed here.
+
+```{r}
+kiplot1fe <- interflex(estimator = "kernel", Y = "polyarchy_chg", X = "icap", D = "populismavg", Z = c("lnyears", "polyarchy_t0", "lngdppc", "lndemocexp"), data = as.matrix(poly_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow", FE = "cow")
+
+print(kiplot1fe$figure)
+```
+
+This is not quite as good as the linear plot suggests, but this is still pretty good.
+
+#### Full Model
+
+```{r}
+m2c <- lm_robust(f2, clusters = cow, data = poly_varis)
+
+summary(m2c)
+```
+
+Sig at .01
+
+```{r}
+liplot2c <- interflex(estimator = "linear", Y = "polyarchy_chg", X = "icap", D = "populismavg", Z = c("lnyears", "polyarchy_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(poly_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow")
+
+print(liplot2c)
+```
+
+Really good effect again
+
+```{r}
+kiplot2c <- interflex(estimator = "kernel", Y = "polyarchy_chg", X = "icap", D = "populismavg", Z = c("lnyears", "polyarchy_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(poly_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow")
+
+print(kiplot2c$figure)
+```
+
+Pretty good, about the same as the simple model with fixed effect.
+
+```{r}
+m2fe <- lm_robust(f2, clusters = cow, fixed_effects = cow, data = poly_varis)
+
+summary(m2fe)
+```
+
+Sig at .05
+
+```{r}
+liplot2fe <- interflex(estimator = "linear", Y = "polyarchy_chg", X = "icap", D = "populismavg", Z = c("lnyears", "polyarchy_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(poly_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow", FE="cow")
+
+print(liplot2fe$figure)
+```
+
+Good model, but lets see how it looks when we do the kernel model.
+
+```{r}
+kiplot2fe <- interflex(estimator = "kernel", Y = "polyarchy_chg", X = "icap", D = "populismavg", Z = c("lnyears", "polyarchy_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(poly_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow", FE = "cow")
+
+print(kiplot2fe$figure)
+```
+
+Really good considering the simple model did not perform as well. This might be over fitted, but it is encouraging. I belive this is a real effect.
+
+#### Free and Fair elections
+
+#### Simple model
+
+```{r}
+m3c <- lm_robust(f3, clusters = cow, data = ff_varis)
+
+summary(m3c)
+```
+
+Barely significant at 0.05
+
+```{r}
+liplot3c <- interflex(estimator = "linear", Y = "frefair_chg", X = "icap", D = "populismavg", Z = c("lnyears", "frefair_t0", "lngdppc", "lndemocexp"), data = as.matrix(ff_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow")
+
+print(liplot3c$figure)
+```
+
+Okay effect. Likely to drop to insignificance
+
+```{r}
+kiplot3c <- interflex(estimator = "kernel", Y = "frefair_chg", X = "icap", D = "populismavg", Z = c("lnyears", "frefair_t0", "lngdppc", "lndemocexp"), data = as.matrix(ff_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow")
+
+print(kiplot3c$figure)
+```
+
+Not bad, but not great.
+
+```{r}
+m3fe <- lm_robust(f3, clusters = cow, fixed_effects = cow, data = ff_varis)
+
+summary(m3fe)
+```
+
+Sig at .1.
+
+```{r}
+liplot3fe <- interflex(estimator = "linear", Y = "frefair_chg", X = "icap", D = "populismavg", Z = c("lnyears", "frefair_t0", "lngdppc", "lndemocexp"), data = as.matrix(ff_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow", FE = "cow")
+
+print(liplot3fe$figure)
+```
+
+Not bad, but it will lose all significance when we relax interaction assumptions.
+
+```{r}
+kiplot3fe <- interflex(estimator = "kernel", Y = "frefair_chg", X = "icap", D = "populismavg", Z = c("lnyears", "frefair_t0", "lngdppc", "lndemocexp"), data = as.matrix(ff_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow", FE = "cow")
+
+print(kiplot3fe$figure)
+```
+
+Not good a good effect here. We cannot extrapolate from the interaction coefficient to other parts of the distribution. Its likely there is some effect going on here, but we do not have enough evidence.
+
+
+#### Full Model
+
+```{r}
+m4c <- lm_robust(f4, clusters = cow, data = ff_varis)
+
+summary(m4c) 
+```
+
+Sig at 0.05
+
+```{r}
+liplot4c <- interflex(estimator = "linear", Y = "frefair_chg", X = "icap", D = "populismavg", Z = c("lnyears", "frefair_t0", "lngdppc"), data = as.matrix(ff_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow")
+
+print(liplot4c$figure)
+
+kiplot4c <- interflex(estimator = "kernel", Y = "frefair_chg", X = "icap", D = "populismavg", Z = c("lnyears", "frefair_t0", "lngdppc"), data = as.matrix(ff_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow")
+
+print(kiplot4c$figure)
+```
+
+Same as the simple model
+
+```{r}
+m4fe <- lm_robust(f4, clusters = cow, fixed_effects = cow, data = ff_varis)
+
+summary(m4fe)
+```
+
+Sig at .1
+
+```{r}
+liplot4fe <- interflex(estimator = "linear", Y = "frefair_chg", X = "icap", D = "populismavg", Z = c("lnyears", "frefair_t0", "lngdppc"), data = as.matrix(ff_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow", FE= "cow")
+
+print(liplot4fe$figure)
+
+kiplot4fe <- interflex(estimator = "kernel", Y = "frefair_chg", X = "icap", D = "populismavg", Z = c("lnyears", "frefair_t0", "lngdppc"), data = as.matrix(ff_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow", FE = "cow")
+
+print(kiplot4fe$figure)
+```
+
+This effect is likely real, but we do not have great evidence to back that claim.
+
+#### Civil Liberties
+
+#### Simple model
+
+```{r}
+m5c <- lm_robust(f5, clusters = cow, data = cl_varis)
+
+summary(m5c) #### sig at 0.05
+
+liplot5c <- interflex(estimator = "linear", Y = "civlib_chg", X = "icap", D = "populismavg", Z = c("lnyears", "lndemocexp", "lngdppc", "civlib_t0"), data = as.matrix(cl_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow")
+
+print(liplot5c$figure)
+```
+
+Really good effect here. These predictors seems to be really good at predicting decline in civil liberties.
+
+```{r}
+kiplot5c <- interflex(estimator = "kernel", Y = "civlib_chg", X = "icap", D = "populismavg", Z = c("lnyears", "lndemocexp", "lngdppc", "civlib_t0"), data = as.matrix(cl_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow")
+
+print(kiplot5c$figure)
+```
+
+The effect stays linear and is still a strong effect.
+
+```{r}
+m5fe <- lm_robust(f5, clusters = cow, fixed_effects = cow, data = cl_varis)
+
+summary(m5fe)
+```
+
+Sig at .05
+
+```{r}
+liplot5fe <- interflex(estimator = "linear", Y = "civlib_chg", X = "icap", D = "populismavg", Z = c("lnyears", "lndemocexp", "lngdppc", "civlib_t0"), data = as.matrix(cl_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow", FE = "cow")
+
+print(liplot5fe$figure)
+```      
+
+Effect stays impressively robust
+
+```{r}
+kiplot5fe <- interflex(estimator = "kernel", Y = "civlib_chg", X = "icap", D = "populismavg", Z = c("lnyears", "lndemocexp", "lngdppc", "civlib_t0"), data = as.matrix(cl_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow", FE = "cow")
+
+print(kiplot5fe$figure)
+```
+
+Best model yet!
+
+#### Full Model
+
+```{r}
+m6c <- lm_robust(f6, clusters = cow, data = cl_varis)
+
+summary(m6c)
+```
+
+Sig at .05
+
+```{r}
+liplot6c <- interflex(estimator = "linear", Y = "civlib_chg", X = "icap", D = "populismavg", Z = c("lnyears", "civlib_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(cl_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow")
+
+print(liplot6c$figure)
+```
+
+Still a great effect
+
+```{r}
+kiplot6c <- interflex(estimator = "kernel", Y = "civlib_chg", X = "icap", D = "populismavg", Z = c("lnyears", "civlib_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(cl_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow")
+
+print(kiplot6c$figure)
+```
+
+Stays fairly linear and keeps the strong effect
+
+```{r}
+m6fe <- lm_robust(f6, clusters = cow, fixed_effects = cow, data = cl_varis)
+
+summary(m6fe$figure) 
+```
+
+Sig at .05
+
+```{r}
+liplot6fe <- interflex(estimator = "linear", Y = "civlib_chg", X = "icap", D = "populismavg", Z = c("lnyears", "civlib_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(cl_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow", FE = "cow")
+
+print(liplot6fe$figure)
+```
+
+The effect looks good here.
+
+```{r}
+kiplot6fe <- interflex(estimator = "kernel", Y = "civlib_chg", X = "icap", D = "populismavg", Z = c("lnyears", "civlib_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(cl_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow", FE = "cow")
+
+print(kiplot6fe$figure)
+```
+
+This looks really good. This is likely a real and linear effect, and we have the evidence to back that claim.
+
+#### Horizontal Accountability
+
+#### Simple model
+
+```{r}
+m7c <- lm_robust(f7, clusters = cow, data = ha_varis)
+
+summary(m7c)
+
+liplot7c <- interflex(estimator = "linear", Y = "horacc_chg", X = "icap", D = "populismavg", Z = c("lnyears", "horacc_t0", "lngdppc"), data = as.matrix(ha_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow")
+
+print(liplot7c)
+
+kiplot7c <- interflex(estimator = "kernel", Y = "horacc_chg", X = "icap", D = "populismavg", Z = c("lnyears", "horacc_t0", "lngdppc"), data = as.matrix(ha_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow")
+
+print(kiplot7c)
+
+m7fe <- lm_robust(f7, clusters = cow, fixed_effects = cow, data = ha_varis)
+
+summary(m7fe)
+
+liplot7fe <- interflex(estimator = "linear", Y = "horacc_chg", X = "icap", D = "populismavg", Z = c("lnyears", "horacc_t0", "lngdppc"), data = as.matrix(ha_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow", FE = "cow")
+
+print(liplot7fe)
+
+kiplot7fe <- interflex(estimator = "kernel", Y = "horacc_chg", X = "icap", D = "populismavg", Z = c("lnyears", "horacc_t0", "lngdppc"), data = as.matrix(ha_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow", FE = "cow")
+
+print(kiplot7fe)
+```
+
+Nothing here is signficant
+
+#### Full model
+
+```{r}
+m8c <- lm_robust(f8, clusters = cow, data = ha_varis)
+
+summary(m8c)
+
+liplot8c <- interflex(estimator = "linear", Y = "horacc_chg", X = "icap", D = "populismavg", Z = c("lnyears", "horacc_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(ha_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow")
+
+print(liplot8c$figure)
+
+kiplot8c <- interflex(estimator = "kernel", Y = "horacc_chg", X = "icap", D = "populismavg", Z = c("lnyears", "horacc_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(ha_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow")
+
+print(kiplot8c$figure)
+
+m8fe <- lm_robust(f8, clusters = cow, fixed_effects = cow, data = ha_varis)
+
+summary(m8fe)
+
+liplot8fe <- interflex(estimator = "linear", Y = "horacc_chg", X = "icap", D = "populismavg", Z = c("lnyears", "horacc_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(ha_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow", FE = "cow")
+
+print(liplot8fe$figure)
+
+kiplot8fe <- interflex(estimator = "kernel", Y = "horacc_chg", X = "icap", D = "populismavg", Z = c("lnyears", "horacc_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(ha_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow", FE = "cow")
+
+print(kiplot8fe$figure) 
+```
+
+All are insignificant. There is likely a small effect, but we have poor evidence, and cannot make a credible claim here.
+
+## Tables
+
+```{r}
+descriptives <- gpl %>% 
+  filter(polyarchy_t0 >= .42) %>% 
+  select(lnseatshare, lndemocexp, lnyears, lngdppc, icap, populismavg, cow, op_strength, lnopseatshare, horacc_t0, horacc_chg, civlib_t0, civlib_chg, frefair_t0, frefair_chg, polyarchy_t0, polyarchy_chg)
+
+stargazer(descriptives, title = "Descriptive Statistics") 
+modelsummary::modelsummary(list(m1c, m3c, m5c, m7c)) 
+modelsummary::modelsummary(list(m2c, m4c, m6c, m8c)) 
+modelsummary::modelsummary(list(m1fe, m3fe, m5fe, m7fe))
+modelsummary::modelsummary(list(m2fe, m4fe, m6fe, m8fe))
+```
