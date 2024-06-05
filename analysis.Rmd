@@ -84,6 +84,7 @@ library(estimatr)
 library(bestglm)
 library(interflex)
 library(stargazer)
+library(lmtest)
 ```
 
 ### Polyarchy Model selection
@@ -1036,7 +1037,7 @@ print(kiplot2c$figure)
 Pretty good, about the same as the simple model with fixed effect.
 
 ```{r}
-m2fe <- lm_robust(f2, clusters = cow, fixed_effects = cow, data = poly_varis)
+m2fe <- lm_robust(f2, fixed_effects = cow, data = poly_varis)
 
 summary(m2fe)
 ```
@@ -1044,7 +1045,7 @@ summary(m2fe)
 Sig at .1. Just barely not 0.05, but this is probably a real effect.
 
 ```{r}
-liplot2fe <- interflex(estimator = "linear", Y = "polyarchy_chg", X = "icap", D = "populismavg", Z = c("lnyears", "polyarchy_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(poly_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow", FE="cow")
+liplot2fe <- interflex(estimator = "linear", Y = "polyarchy_chg", X = "icap", D = "populismavg", Z = c("lnyears", "polyarchy_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(poly_varis), na.rm = T, wald = T, ylab = "Effect of Populist Discourse", xlab = "Incumbent Capacity", FE="cow")
 
 print(liplot2fe$figure)
 ```
@@ -1052,12 +1053,24 @@ print(liplot2fe$figure)
 Good model, but lets see how it looks when we do the kernel model.
 
 ```{r}
-kiplot2fe <- interflex(estimator = "kernel", Y = "polyarchy_chg", X = "icap", D = "populismavg", Z = c("lnyears", "polyarchy_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(poly_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow", FE = "cow")
+kiplot2fe <- interflex(estimator = "kernel", Y = "polyarchy_chg", X = "icap", D = "populismavg", Z = c("lnyears", "polyarchy_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(poly_varis), na.rm = T, wald = T, ylab = "Effect of Populist Discourse", xlab = "Incumbent Capacity", FE = "cow", main = "Figure 2: Effect of Populist Discourse on Electoral Democracy", theme.bw = T)
 
 print(kiplot2fe$figure)
 ```
 
 Really good considering the simple model did not perform as well. This might be over fitted, but it is encouraging. This actually look better than the standard linear model and might be significant at 0.05.
+
+### Liklihood Ratio Test
+
+```{r}
+poly_b <- lm(polyarchy_chg ~ populismavg + icap + lnseatshare + lndemocexp + lnyears + lngdppc + polyarchy_t0 + op_strength + lnopseatshare + factor(cow), data = poly_varis)
+
+poly_i <- lm(polyarchy_chg ~ populismavg * icap + lnseatshare + lndemocexp + lnyears + lngdppc + polyarchy_t0 + op_strength + lnopseatshare + factor(cow), data = poly_varis)
+
+poly_lr <- lrtest(poly_b, poly_i)
+poly_lr
+```
+
 
 #### Free and Fair elections
 
@@ -1151,6 +1164,17 @@ print(kiplot4fe$figure)
 
 This model performs even worse. Likely not a real effect.
 
+### Liklihood Ratio Test
+
+```{r}
+ff_b <- lm(frefair_chg ~ populismavg + icap + lnseatshare + lndemocexp + lnyears + lngdppc + frefair_t0 + op_strength + lnopseatshare + factor(cow), data = ff_varis)
+
+ff_i <- lm(frefair_chg ~ populismavg * icap + lnseatshare + lndemocexp + lnyears + lngdppc + frefair_t0 + op_strength + lnopseatshare + factor(cow), data = ff_varis)
+
+ff_lr <- lrtest(ff_b, ff_i)
+ff_lr
+```
+
 #### Civil Liberties
 
 #### Simple model
@@ -1242,12 +1266,24 @@ print(liplot6fe$figure)
 The effect looks good here.
 
 ```{r}
-kiplot6fe <- interflex(estimator = "kernel", Y = "civlib_chg", X = "icap", D = "populismavg", Z = c("lnyears", "civlib_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(cl_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow", FE = "cow")
+kiplot6fe <- interflex(estimator = "kernel", Y = "civlib_chg", X = "icap", D = "populismavg", Z = c("lnyears", "civlib_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(cl_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", FE = "cow")
 
 print(kiplot6fe$figure)
 ```
 
 This looks really good. This is likely a real and linear effect, and we have the evidence to back that claim.
+
+
+### Liklihood Ratio Test
+
+```{r}
+civlib_b <- lm(civlib_chg ~ populismavg + icap + lnseatshare + lndemocexp + lnyears + lngdppc + civlib_t0 + op_strength + lnopseatshare + factor(cow), data = cl_varis)
+
+civlib_i <- lm(civlib_chg ~ populismavg * icap + lnseatshare + lndemocexp + lnyears + lngdppc + civlib_t0 + op_strength + lnopseatshare + factor(cow), data = cl_varis)
+
+civlib_lr <- lrtest(civlib_b, civlib_i)
+civlib_lr
+```
 
 #### Horizontal Accountability
 
@@ -1304,20 +1340,32 @@ kiplot8c <- interflex(estimator = "kernel", Y = "horacc_chg", X = "icap", D = "p
 
 print(kiplot8c$figure)
 
-m8fe <- lm_robust(f8, clusters = cow, fixed_effects = cow, data = ha_varis)
+m8fe <- lm_robust(f8, fixed_effects = cow, data = ha_varis)
 
 summary(m8fe)
 
-liplot8fe <- interflex(estimator = "linear", Y = "horacc_chg", X = "icap", D = "populismavg", Z = c("lnyears", "horacc_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(ha_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow", FE = "cow")
+liplot8fe <- interflex(estimator = "linear", Y = "horacc_chg", X = "icap", D = "populismavg", Z = c("lnyears", "horacc_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(ha_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", FE = "cow")
 
 print(liplot8fe$figure)
 
-kiplot8fe <- interflex(estimator = "kernel", Y = "horacc_chg", X = "icap", D = "populismavg", Z = c("lnyears", "horacc_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(ha_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", cl = "cow", FE = "cow")
+kiplot8fe <- interflex(estimator = "kernel", Y = "horacc_chg", X = "icap", D = "populismavg", Z = c("lnyears", "horacc_t0", "lngdppc", "lndemocexp", "lnseatshare", "op_strength", "lnopseatshare"), data = as.matrix(ha_varis), na.rm = T, wald = T, Dlabel = "Logged Populism", Xlabel = "Incumbent Capacity", FE = "cow")
 
 print(kiplot8fe$figure) 
 ```
 
 All are insignificant.
+
+### Liklihood Ratio Test
+
+```{r}
+ha_b <- lm(horacc_chg ~ populismavg + icap + lnseatshare + lndemocexp + lnyears + lngdppc + horacc_t0 + op_strength + lnopseatshare + factor(cow), data = ha_varis)
+
+ha_i <- lm(horacc_chg ~ populismavg * icap + lnseatshare + lndemocexp + lnyears + lngdppc + horacc_t0 + op_strength + lnopseatshare + factor(cow), data = ha_varis)
+
+ha_lr <- lrtest(ha_b, ha_i)
+ha_lr
+```
+
 
 ## Tables
 
@@ -1601,12 +1649,12 @@ plot_base <- ggplot(base_mat, aes(x = r_names, y = mean, ymin = lower, ymax = up
   coord_flip() +
   theme_bw()+
   geom_hline(yintercept = 0, color = "grey70") +
-  labs(title = "Figure 1: Substantive Effects on Backsliding", x = "", y = "Predicted Effect", caption = "All Variables are mean-centered and standarized to a two standard deviation change") +
+  labs(title = "Figure 1: Substantive Effects on Backsliding", x = "", y = "Predicted Effect", caption = "All predictors are mean-centered and standarized to a two standard deviation change") +
   scale_shape_manual(values=c(15,16,17,18)) +
   scale_alpha_manual(values=c(.4 ,.6, .8, 1)) +
   theme(axis.text.y = element_text(size = 10), axis.text.x = element_text(size = 10), legend.title = element_blank(), legend.position = "bottom")
 
-ggs
+ggsave("/populistpaths/plots/baseline sub.png", width = 4, height = 3, plot = plot_base)
 
 ```
 
